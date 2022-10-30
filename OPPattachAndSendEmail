@@ -1,0 +1,132 @@
+public class OPPattachAndSendEmail {
+
+    public Opportunity opp {get; set;}
+
+    public OPPattachAndSendEmail(ApexPages.StandardController Controller){
+        this.opp = (Opportunity)Controller.getRecord();
+    }
+        
+    // for sorting opp products
+    public List<OpportunityLineItem> getOpportunityLineItems() {
+    string soqlQuery = 'SELECT Id, OpportunityId, CreatedDate, Name, Product2.Name, Description, UnitPrice, TotalPrice, Quantity, Product_Type__c, Product_Name__c ' 
+         				+'FROM OpportunityLineItem '+'WHERE OpportunityId =\''+ opp.ID + '\' ORDER BY CreatedDate ASC ';
+
+   	List<OpportunityLineItem> results = Database.query(soqlQuery);
+    return results;
+	}
+    
+    // for sorting in scope
+    public List<ScopeofService__c > getInScopes() {
+    string soqlQuery = 'SELECT Id, iN_sCOPE__c, Out_of_Scope__c, Opportunity__c, recordtype.name FROM ScopeofService__c  '
+        				+'WHERE Opportunity__c =\''+ opp.ID+ '\' AND recordtype.name = \'in scope\' ORDER BY CreatedDate ASC ';
+ 	
+
+   	List<ScopeofService__c > results = Database.query(soqlQuery);
+    return results;
+    }
+    
+    //for sorting out of scope
+    public List<ScopeofService__c > getOutofScope() {
+    string soqlQuery = 'SELECT Id, iN_sCOPE__c, Out_of_Scope__c, Opportunity__c, recordtype.name FROM ScopeofService__c  '
+        				+'WHERE Opportunity__c =\''+ opp.ID+ '\' AND recordtype.name = \'Out of Scope\' ORDER BY CreatedDate ASC ';
+ 	
+
+   	List<ScopeofService__c > resultsOUT = Database.query(soqlQuery);
+    return resultsOUT;
+    }
+
+    //INSERT PDF FLOW ACTION
+
+    @InvocableMethod(label='Attach and Send PDF?')
+    public static void shouldAttach (List<FlowInput> inputs){
+        
+        FlowInput input = inputs.get(0);
+        string oppID = input.recordID;
+        string ProductType = input.producttype;
+        string PdfTitle = input.PdfTitle;
+
+        
+        //Create PDF
+        
+        Blob pdfBlob;
+        String pdfTemplate = input.pdfTemplate;
+        PageReference pdfPage = new PageReference('/apex/'+ pdfTemplate); //pass dynamic VF page
+        	pdfpage.getParameters().put('id',oppID);        
+
+		if (!Test.isRunningTest()) { 
+			pdfBlob = pdfPage.getContentAsPDF(); 
+		} else { 
+			pdfBlob = Blob.valueOf('SoW PDF');
+		}
+            
+            //insert PDF into attachment
+            
+        ContentVersion DocVer = New ContentVersion();
+            docver.ContentLocation = 's';
+            docver.PathOnClient = 'invoice.pdf';
+            docver.Title = PdfTitle +'.pdf';
+            docver.VersionData = pdfblob;
+            insert docver;
+            
+         string Versid = [select contentDocumentid from contentversion where id =:Docver.id].contentDocumentid;
+            contentDocumentLink DocLink = new contentDocumentLink();
+            doclink.ContentDocumentId = versid;
+            doclink.LinkedEntityId = oppID;
+            doclink.ShareType = 'I';
+            doclink.Visibility = 'AllUsers';
+            insert doclink;
+
+            // Prepare email content 
+
+         String toAddress = input.toAddress;
+         List<string> toAddressList = new List<String>();
+            toAddressList.add(toAddress);
+         String Subject = input.EmailSubject;
+         String conID = input.conID;       
+
+		String ExtraMessage = input.ExtraMessage;
+        String emailSign = input.emailSign;
+        String EmailStarter = input.EmailStarter;
+            
+		// send email action
+        
+        Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+            mail.setToAddresses(toAddressList);
+            mail.setSubject(subject);
+            mail.setHtmlBody(EmailStarter + ExtraMessage + emailSign);
+            mail.setTargetObjectId(conID);
+            mail.setEntityAttachments(new list<Id> {DocVer.Id});
+            mail.saveAsActivity = true; 
+        	
+        
+        Messaging.sendEmail(new Messaging.SingleEmailMessage[] { mail });
+
+        }
+
+    
+    // FLOW INPUT
+
+    	public class FlowInput{
+        @InvocableVariable(label='Current ID')
+        public string recordID;
+        @InvocableVariable(label='Product Type')
+        public String ProductType;  
+        @InvocableVariable(label='Email Starter')
+        public String EmailStarter;
+        @InvocableVariable(label='Recipient Email')
+        public String toAddress;
+        @InvocableVariable(label='Contact ID')
+        public String conID;        
+		@InvocableVariable(label='Email Subject')
+        public String EmailSubject;
+        @InvocableVariable(label='Extra Message')
+        public String ExtraMessage;  
+        @InvocableVariable(label='Email Signature')
+        public String emailSign;  
+        @InvocableVariable(label='Select PDF Template')
+        public String pdfTemplate;
+        @InvocableVariable(label='PDF title')
+        public String pdfTitle;             
+
+    }
+}
